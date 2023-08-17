@@ -1,0 +1,86 @@
+import json
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, r2_score
+
+# Load JSON configuration
+with open('algoparams_from_ui.json', 'r') as json_file:
+    config = json.load(json_file)
+
+# Load data from CSV file
+data = pd.read_csv(config['session_info']['dataset'])
+
+# Step 1: Read target and prediction type
+target_config = config['target']
+target_column = target_config['target']
+prediction_type = target_config['type']
+
+# Prepare feature and target data
+X = data.drop(columns=[target_column])
+y = data[target_column]
+
+# Split data if partitioning is enabled
+if target_config['partitioning']:
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=0)
+else:
+    X_train, X_test, y_train, y_test = X, X, y, y
+
+# Step 2: Feature handling using ColumnTransformer
+feature_handling_config = config['feature_handling']
+numeric_features = [feature_name for feature_name, feature_info in feature_handling_config.items()
+                    if feature_info['feature_variable_type'] == 'numerical']
+non_numeric_features = [feature_name for feature_name, feature_info in feature_handling_config.items()
+                        if feature_info['feature_variable_type'] == 'text']
+
+numeric_transformer = SimpleImputer(strategy='mean')
+non_numeric_transformer = SimpleImputer(strategy='most_frequent')
+
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', numeric_transformer, numeric_features),
+        ('cat', non_numeric_transformer, non_numeric_features)
+    ])
+
+# Step 4: Model selection and tuning
+selected_model_config = config['algorithms'][prediction_type]
+if selected_model_config['is_selected']:
+    if prediction_type == 'Regression':
+        model = RandomForestRegressor(
+            n_estimators=selected_model_config['min_trees'],
+            max_depth=selected_model_config['max_depth'],
+            min_samples_leaf=selected_model_config['min_samples_per_leaf_min_value'],
+            random_state=0
+        )
+    else:
+        model = None  # Add more classification models here
+
+    if model:
+        steps = [('preprocessor', preprocessor), ('model', model)]
+        pipeline = Pipeline(steps)
+
+        # Fit the pipeline
+        pipeline.fit(X_train, y_train)
+
+        # Predict using the model (last estimator in the pipeline) if a model is selected
+        y_pred = pipeline.named_steps['model'].predict(X_test)
+
+        # Step 6: Evaluate and log metrics
+        if prediction_type == 'Regression':
+            mse = mean_squared_error(y_test, y_pred)
+            r2 = r2_score(y_test, y_pred)
+            print(f"Mean Squared Error: {mse}")
+            print(f"R-squared Score: {r2}")
+        else:
+            # Add classification metrics here
+            pass
+    else:
+        print("No suitable model selected for the prediction type.")
+else:
+    print("No model selected.")
+
+# You can add additional steps for hyperparameter tuning, logging, and other requirements.
